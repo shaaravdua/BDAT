@@ -1,3 +1,51 @@
+hp@LAPTOP-FK9OT6LQ:~$ hdfs dfs -mkdir /user/practice
+
+a. Remove a Directory
+To remove an empty directory:
+
+Bash
+hdfs dfs -rmdir /user/practice
+To remove a directory and everything inside it (recursive):
+
+Bash
+hdfs dfs -rm -r /user/practice
+b. View/Read File Contents
+To see the text inside a file without downloading it:
+
+Bash
+hdfs dfs -cat /user/practice/myfile.txt
+Tip: If the file is huge, use -tail to see just the last kilobyte.
+
+c. Download/Copy from HDFS to Local
+To bring a file from the HDFS cluster down to your local Linux machine:
+
+Bash
+hdfs dfs -get /user/practice/myfile.txt /home/hp/Downloads/
+You can also use -copyToLocal, which functions identically.
+
+d. Copy/Move Files within HDFS
+To copy a file from one HDFS folder to another:
+
+Bash
+hdfs dfs -cp /user/practice/file1.txt /user/backup/file1.txt
+To move (rename) a file within HDFS:
+
+Bash
+hdfs dfs -mv /user/practice/file1.txt /user/practice/new_name.txt
+e. Remove a File from HDFS
+To delete a specific file:
+
+Bash
+hdfs dfs -rm /user/practice/myfile.txt
+By default, this might move the file to a .Trash folder unless you have trash features disabled.
+
+f. View File Permissions
+To see the permissions, owner, and group of your files:
+
+Bash
+hdfs dfs -ls /user/practice
+
+
 1. Character Frequency Count
 Mapper Key: The character.
 
@@ -156,9 +204,169 @@ for line in sys.stdin:
 if current_name == name:
     average = current_sum / current_count
     print(f"{current_name}\t{average}")
-Would you like me to show you the terminal command needed to execute these Python scripts using the hadoop-streaming.jar on a cluster?
 
+5. Filtering Data (Log File Analysis)
+The Problem: Given a massive server log file, extract only the lines that contain the word "ERROR".
+The Secret: This is often a "Map-Only" job. You don't actually need a Reducer to aggregate anything; you just need the Mapper to filter out the noise.
 
+Mapper Key: The entire log line.
+
+Mapper Value: None (or empty).
+
+mapper.py
+
+Python
+import sys
+
+for line in sys.stdin:
+    # If the word ERROR is in the line, print it. Otherwise, ignore it.
+    if "ERROR" in line:
+        # We don't need a value, so we just print the line
+        print(line.strip())
+reducer.py
+(Technically, you can run this job with -numReduceTasks 0 in Hadoop, but if you must write a Reducer, it's just an "Identity Reducer" that passes data through.)
+
+Python
+import sys
+for line in sys.stdin:
+    print(line.strip())
+6. The Inverted Index (Search Engine Basics)
+The Problem: Given a dataset of documents (where each line is DocumentID, Text), create an index showing which documents contain which words.
+The Secret: Your key must be the Word, and the value must be the DocumentID. The Reducer will group all the Document IDs together for each word.
+
+Mapper Key: The Word.
+
+Mapper Value: The Document ID.
+
+mapper.py
+
+Python
+import sys
+
+for line in sys.stdin:
+    # Assuming format: "Doc1, The quick brown fox"
+    parts = line.strip().split(',', 1)
+    if len(parts) == 2:
+        doc_id = parts[0].strip()
+        text = parts[1].strip()
+        
+        # Split text into words and emit (Word, DocID)
+        for word in text.split():
+            print(f"{word}\t{doc_id}")
+reducer.py
+
+Python
+import sys
+
+current_word = None
+doc_list = [] # Keep a list of documents where the word appears
+
+for line in sys.stdin:
+    word, doc_id = line.strip().split('\t', 1)
+    
+    if current_word == word:
+        # Avoid duplicate doc IDs in our list
+        if doc_id not in doc_list:
+            doc_list.append(doc_id)
+    else:
+        if current_word:
+            # Join the list of doc IDs into a single string separated by commas
+            docs = ", ".join(doc_list)
+            print(f"{current_word}\t{docs}")
+            
+        current_word = word
+        doc_list = [doc_id]
+
+if current_word == word:
+    docs = ", ".join(doc_list)
+    print(f"{current_word}\t{docs}")
+7. Distinct/Unique Item Count
+The Problem: Given a dataset of website visits (e.g., IP_Address, Timestamp), find the list of unique IP addresses that visited the site.
+The Secret: MapReduce automatically groups identical keys. If you make the IP Address the key, the Reducer will group all identical IPs. You just need the Reducer to output the key once and ignore the duplicates.
+
+Mapper Key: The IP Address.
+
+Mapper Value: A dummy value (e.g., 1).
+
+mapper.py
+
+Python
+import sys
+
+for line in sys.stdin:
+    parts = line.strip().split(',')
+    if len(parts) >= 1:
+        ip_address = parts[0]
+        print(f"{ip_address}\t1")
+reducer.py
+
+Python
+import sys
+
+current_ip = None
+
+for line in sys.stdin:
+    ip_address, _ = line.strip().split('\t', 1)
+    
+    # We only care when the IP changes. We print it once and move on.
+    if current_ip != ip_address:
+        if current_ip:
+            print(current_ip) # Just print the unique IP
+        current_ip = ip_address
+
+if current_ip == ip_address:
+    print(current_ip)
+8. Multiple Aggregations (Min, Max, and Count)
+The Problem: Given a dataset of employees (Department, Salary), find the Minimum Salary, Maximum Salary, and Total Number of Employees for each department in a single pass.
+The Secret: You don't need separate jobs for Min, Max, and Count. The Reducer can track all three variables simultaneously.
+
+Mapper Key: Department.
+
+Mapper Value: Salary.
+
+mapper.py
+
+Python
+import sys
+
+for line in sys.stdin:
+    parts = line.strip().split(',')
+    if len(parts) == 2:
+        dept = parts[0]
+        salary = parts[1]
+        print(f"{dept}\t{salary}")
+reducer.py
+
+Python
+import sys
+
+current_dept = None
+min_sal = float('inf')  # Start infinitely high
+max_sal = float('-inf') # Start infinitely low
+emp_count = 0
+
+for line in sys.stdin:
+    dept, salary = line.strip().split('\t', 1)
+    salary = float(salary)
+    
+    if current_dept == dept:
+        emp_count += 1
+        if salary < min_sal: min_sal = salary
+        if salary > max_sal: max_sal = salary
+    else:
+        if current_dept:
+            print(f"{current_dept}\tMin:{min_sal}, Max:{max_sal}, Count:{emp_count}")
+            
+        current_dept = dept
+        emp_count = 1
+        min_sal = salary
+        max_sal = salary
+
+if current_dept == dept:
+    print(f"{current_dept}\tMin:{min_sal}, Max:{max_sal}, Count:{emp_count}")
+If you can write the boilerplate logic for current_key == key and understand how to assign your Mapper Keys and Values, you can pass almost any basic MapReduce exam question.
+
+Would you like to tackle the hardest common exam question—Relational Joins in MapReduce (Reduce-Side Join)—where you have to merge two different datasets together?
 
 1. Load the sales dataset and display the first 10 records
 You need to define the schema (column names and data types) when loading the file. PigStorage(',') tells Pig that the file is comma-separated.
