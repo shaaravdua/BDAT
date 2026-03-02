@@ -1,0 +1,227 @@
+1. Character Frequency Count
+Mapper Key: The character.
+
+Mapper Value: 1.
+
+mapper.py
+
+Python
+import sys
+for line in sys.stdin:
+    # Iterate through every character in the line
+    for char in line.strip():
+        # Ignore spaces if you want, or remove this if statement to count them
+        if char != " ":
+            print(f"{char}\t1")
+reducer.py
+
+Python
+import sys
+current_char = None
+current_count = 0
+
+for line in sys.stdin:
+    char, count = line.strip().split('\t', 1)
+    count = int(count)
+
+    if current_char == char:
+        current_count += count
+    else:
+        if current_char:
+            print(f"{current_char}\t{current_count}")
+        current_char = char
+        current_count = count
+
+if current_char == char:
+    print(f"{current_char}\t{current_count}")
+
+2. Maximum Temperature per Year
+Mapper Key: The Year.
+
+Mapper Value: The Temperature. (Assuming data format: Year,Temperature)
+
+mapper.py
+
+Python
+import sys
+for line in sys.stdin:
+    parts = line.strip().split(',')
+    if len(parts) == 2:
+        year = parts[0]
+        temp = parts[1]
+        print(f"{year}\t{temp}")
+reducer.py
+
+Python
+import sys
+current_year = None
+max_temp = -9999 # Start with a very low number
+
+for line in sys.stdin:
+    year, temp = line.strip().split('\t', 1)
+    temp = int(temp)
+
+    if current_year == year:
+        if temp > max_temp:
+            max_temp = temp
+    else:
+        if current_year:
+            print(f"{current_year}\t{max_temp}")
+        current_year = year
+        max_temp = temp
+
+if current_year == year:
+    print(f"{current_year}\t{max_temp}")
+3. Top N Records (e.g., Top 3 Highest Scores)
+This is unique. We want all data to go to a single reducer to find the absolute top 3.
+
+Mapper Key: A dummy string like "all".
+
+Mapper Value: The entire record. (Assuming data format: Name,Score)
+
+mapper.py
+
+Python
+import sys
+for line in sys.stdin:
+    # Send everything to one reducer with a dummy key
+    print(f"all\t{line.strip()}")
+reducer.py
+For the reducer, we will keep a running list of the top 3 records. We don't need the complex current_key logic because the key is always "all".
+
+Python
+import sys
+
+top_records = [] # List to hold tuples of (score, record_string)
+
+for line in sys.stdin:
+    dummy_key, record = line.strip().split('\t', 1)
+    
+    # Extract the score from the record (Assuming format "Name,Score")
+    score = int(record.split(',')[1])
+    
+    # Add to our list
+    top_records.append((score, record))
+    
+    # Sort the list in descending order based on the score (x[0])
+    top_records.sort(reverse=True, key=lambda x: x[0])
+    
+    # Keep only the top 3
+    top_records = top_records[:3]
+
+# Print the final top 3 records
+for score, record in top_records:
+    print(record)
+4. Average Value for Each Key
+Mapper Key: The ID/Name (e.g., StudentName).
+
+Mapper Value: The metric (e.g., Score).
+
+mapper.py
+
+Python
+import sys
+for line in sys.stdin:
+    parts = line.strip().split(',')
+    if len(parts) == 2:
+        name = parts[0]
+        score = parts[1]
+        print(f"{name}\t{score}")
+reducer.py
+
+Python
+import sys
+current_name = None
+current_sum = 0
+current_count = 0
+
+for line in sys.stdin:
+    name, score = line.strip().split('\t', 1)
+    score = float(score) # Use float for averages
+
+    if current_name == name:
+        current_sum += score
+        current_count += 1
+    else:
+        if current_name:
+            # Calculate and print the average for the previous person
+            average = current_sum / current_count
+            print(f"{current_name}\t{average}")
+        
+        # Reset for the new person
+        current_name = name
+        current_sum = score
+        current_count = 1
+
+if current_name == name:
+    average = current_sum / current_count
+    print(f"{current_name}\t{average}")
+Would you like me to show you the terminal command needed to execute these Python scripts using the hadoop-streaming.jar on a cluster?
+
+
+
+1. Load the sales dataset and display the first 10 records
+You need to define the schema (column names and data types) when loading the file. PigStorage(',') tells Pig that the file is comma-separated.
+
+Code snippet
+-- Load the data
+sales = LOAD 'sales.csv' USING PigStorage(',') AS (order_id:int, product:chararray, category:chararray, amount:float);
+
+-- Get the first 10 records
+first_10 = LIMIT sales 10;
+
+-- Display the results
+DUMP first_10;
+2. Filter and display products where the amount is greater than 5000
+
+Code snippet
+-- Filter the data
+high_value_sales = FILTER sales BY amount > 5000;
+
+DUMP high_value_sales;
+3. Sort the products in descending order of amount
+
+Code snippet
+-- Order the data in descending (DESC) order
+sorted_sales = ORDER sales BY amount DESC;
+
+DUMP sorted_sales;
+4. Group sales by category and find the total sales amount for each
+This is a two-step process. First, group the data, then iterate through the groups to calculate the sum.
+
+Code snippet
+-- Group the data
+grouped_by_category = GROUP sales BY category;
+
+-- Calculate the total amount per category
+total_sales_per_category = FOREACH grouped_by_category GENERATE group AS category, SUM(sales.amount) AS total_amount;
+
+DUMP total_sales_per_category;
+5. Perform a JOIN on the order_id column between sales and customers
+
+Code snippet
+-- Load the customer dataset
+customers = LOAD 'customers.csv' USING PigStorage(',') AS (order_id:int, customer_name:chararray, city:chararray);
+
+-- Join the two datasets on the common column 'order_id'
+joined_data = JOIN sales BY order_id, customers BY order_id;
+
+DUMP joined_data;
+6. Find the top 3 most expensive products
+This combines the ORDER BY and LIMIT operations.
+
+Code snippet
+-- Sort descending, then limit to 3
+sorted_sales_desc = ORDER sales BY amount DESC;
+top_3_expensive = LIMIT sorted_sales_desc 3;
+
+DUMP top_3_expensive;
+7. Store the filtered high-value transactions in an HDFS output directory
+Instead of using DUMP to print to the screen, use STORE to save the results to a file.
+
+Code snippet
+-- Filter the data first
+high_value_sales = FILTER sales BY amount > 5000;
+
+-- Store the results in a directory named 'hdfs_output_dir'
+STORE high_value_sales INTO 'hdfs_output_dir' USING PigStorage(',');
