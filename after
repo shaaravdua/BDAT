@@ -1,0 +1,584 @@
+You've got this! When you look closely at these two exercises, you'll realize they are essentially asking you to build the exact same PySpark Machine Learning pipeline, just with slightly different target variables. When scaling distributed machine learning tasks, the architecture remains remarkably consistent whether you are predicting text plagiarism or employee churn.
+
+Here is your strategic study guide for tomorrow's exam, breaking down exactly what repeats, the core concepts to understand, and the syntax you need to memorize.
+
+0. The Prerequisite: Moving Data to HDFS
+Before writing any PySpark code, you must push your local CSV files into the Hadoop Distributed File System (HDFS). You should know these terminal commands by heart:
+
+Bash
+# Start Hadoop services (if not already running)
+start-dfs.sh
+start-yarn.sh
+
+# Create a directory in HDFS for your project
+hdfs dfs -mkdir -p /user/data/employee_project
+
+# Copy the local CSV files into HDFS
+hdfs dfs -put local_path/employee_attrition.csv /user/data/employee_project/
+hdfs dfs -put local_path/employee_promotion.csv /user/data/employee_project/
+1. What is Repeating? (The Core Pipeline)
+Almost 80% of the work is identical in both questions. Both exercises require the exact same foundational PySpark ML workflow:
+
+Initializing Spark & Loading Data: Reading the CSV from HDFS into a Spark DataFrame.
+
+Preprocessing (Feature Engineering): Handling nulls, converting categorical text data into numbers, and merging all features into a single vector.
+
+Exploratory Data Analysis (EDA): Using basic DataFrame operations (groupBy, describe, show) to find trends.
+
+Classification Training: Splitting the data and training a model (like Random Forest or Logistic Regression) to predict a categorical outcome (Churn = Yes/No, Promotion = Yes/No).
+
+Evaluation: Testing the model's accuracy.
+
+The ONLY difference: * Exercise 1 adds a Regression task (predicting a continuous number: Salary).
+
+Exercise 2 adds a Deployment step (saving the model for future use).
+
+2. What to Learn by Heart (PySpark Cheat Sheet)
+Memorize these PySpark code blocks. If you know these, you can answer both questions seamlessly.
+
+A. Session & Load (Identical for both)
+Python
+from pyspark.sql import SparkSession
+
+# 1. Initialize Spark
+spark = SparkSession.builder.appName("HR_Analytics").getOrCreate()
+
+# 2. Load from HDFS
+df = spark.read.csv("hdfs:///user/data/employee_project/dataset.csv", header=True, inferSchema=True)
+B. Preprocessing (The Spark ML Way)
+Spark ML algorithms cannot read standard columns. They require all input features to be combined into a single column (usually called "features"). You must memorize this flow: StringIndexer → VectorAssembler.
+
+Python
+from pyspark.ml.feature import StringIndexer, VectorAssembler
+
+# 1. Convert categorical strings to numeric indexes (e.g., Department: "Sales" -> 1.0)
+indexer = StringIndexer(inputCol="Department", outputCol="Dept_Index")
+df_indexed = indexer.fit(df).transform(df)
+
+# 2. Assemble all feature columns into one vector column
+assembler = VectorAssembler(
+    inputCols=["Age", "YearsAtCompany", "Dept_Index"], # Add your actual columns here
+    outputCol="features"
+)
+final_data = assembler.transform(df_indexed)
+C. Train/Test Split (Identical for both)
+Python
+train_data, test_data = final_data.randomSplit([0.8, 0.2], seed=42)
+D. The Models (Classification vs. Regression)
+You need to know how to instantiate and fit a model.
+
+For Churn/Promotion (Classification):
+
+Python
+from pyspark.ml.classification import RandomForestClassifier
+rf = RandomForestClassifier(featuresCol="features", labelCol="Churn") # or "Promotion"
+rf_model = rf.fit(train_data)
+predictions = rf_model.transform(test_data)
+For Salary (Regression - Q1 only):
+
+Python
+from pyspark.ml.regression import RandomForestRegressor
+lr = RandomForestRegressor(featuresCol="features", labelCol="Salary")
+lr_model = lr.fit(train_data)
+salary_predictions = lr_model.transform(test_data)
+E. Evaluation Metrics
+Python
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator, RegressionEvaluator
+
+# Classification Accuracy (For Churn / Promotion)
+evaluator = MulticlassClassificationEvaluator(labelCol="Churn", predictionCol="prediction", metricName="accuracy")
+accuracy = evaluator.evaluate(predictions)
+
+# Regression Error (For Salary)
+reg_eval = RegressionEvaluator(labelCol="Salary", predictionCol="prediction", metricName="rmse")
+rmse = reg_eval.evaluate(salary_predictions)
+F. Deployment (Q2 Only)
+Saving a model so it can be loaded later without retraining.
+
+Python
+# Save the model to HDFS or local
+rf_model.save("hdfs:///user/data/saved_models/promotion_rf_model")
+
+# To load it later:
+# from pyspark.ml.classification import RandomForestClassificationModel
+# loaded_model = RandomForestClassificationModel.load("hdfs:///user/data/...")
+
+
+SparkSQL
+Save the following code in a file named week10_exercises.py and run it using spark-submit week10_exercises.py.
+
+Python
+from pyspark.sql import SparkSession
+
+# Initialize a single SparkSession for all exercises
+spark = SparkSession.builder \
+    .appName("Week 10 Exercises") \
+    .getOrCreate()
+
+# ==============================================================================
+# Exercise 1: Employee Analytics Using SparkSQL
+# ==============================================================================
+print("--- Exercise 1: Employee Analytics ---")
+
+# a) Load employee data from HDFS
+# Adjust the HDFS path to match your Hadoop setup (e.g., hdfs://localhost:9000/...)
+emp_df = spark.read.csv("hdfs:///user/hadoop/employee_extended.csv", header=True, inferSchema=True)
+
+# b) Create SparkSQL views
+emp_df.createOrReplaceTempView("employees")
+
+# c) Display highest salaried employee in each department
+# Using a Window function to rank salaries within each department
+highest_salary_df = spark.sql("""
+    SELECT name, department, salary
+    FROM (
+        SELECT name, department, salary, 
+               ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary DESC) as rank
+        FROM employees
+    )
+    WHERE rank = 1
+""")
+print("Highest Salaried Employee per Department:")
+highest_salary_df.show()
+
+# d) Perform gender-wise salary analysis
+gender_analysis_df = spark.sql("""
+    SELECT gender, 
+           ROUND(AVG(salary), 2) as avg_salary, 
+           MAX(salary) as max_salary, 
+           MIN(salary) as min_salary
+    FROM employees
+    GROUP BY gender
+""")
+print("Gender-wise Salary Analysis:")
+gender_analysis_df.show()
+
+# e) Save SQL results back to HDFS
+# Saving the gender analysis result as an example
+gender_analysis_df.write.mode("overwrite").csv("hdfs:///user/hadoop/output/gender_analysis")
+print("Saved gender analysis results to HDFS.\n")
+
+
+# ==============================================================================
+# Exercise 2: Sales Department Data Using SparkSQL
+# ==============================================================================
+print("--- Exercise 2: Sales Department Data ---")
+
+# a) Load data into SparkSQL
+sales_df = spark.read.csv("hdfs:///user/hadoop/sales_data.csv", header=True, inferSchema=True)
+sales_df.createOrReplaceTempView("sales")
+
+# b) Compute monthly total sales
+# Assuming a 'date' column exists. DATE_FORMAT extracts the Year and Month.
+monthly_sales_df = spark.sql("""
+    SELECT DATE_FORMAT(date, 'yyyy-MM') as month, 
+           ROUND(SUM(revenue), 2) as total_sales
+    FROM sales
+    GROUP BY DATE_FORMAT(date, 'yyyy-MM')
+    ORDER BY month
+""")
+print("Monthly Total Sales:")
+monthly_sales_df.show()
+
+# c) Identify top 5 customers
+top_customers_df = spark.sql("""
+    SELECT customer_id, ROUND(SUM(revenue), 2) as total_spent
+    FROM sales
+    GROUP BY customer_id
+    ORDER BY total_spent DESC
+    LIMIT 5
+""")
+print("Top 5 Customers:")
+top_customers_df.show()
+
+# d) Calculate average revenue per product
+avg_revenue_product_df = spark.sql("""
+    SELECT product_id, ROUND(AVG(revenue), 2) as avg_revenue
+    FROM sales
+    GROUP BY product_id
+    ORDER BY avg_revenue DESC
+""")
+print("Average Revenue per Product:")
+avg_revenue_product_df.show()
+
+
+# ==============================================================================
+# Exercise 3: Department Insights
+# ==============================================================================
+print("--- Exercise 3: Department Insights ---")
+
+# Note: Assuming you have a departments.csv. If not, replace this load with your actual method.
+dept_df = spark.read.csv("hdfs:///user/hadoop/departments.csv", header=True, inferSchema=True)
+dept_df.createOrReplaceTempView("departments")
+
+# a) Join and display employee names with department names
+# Assuming 'dept_id' is the common key in both tables
+emp_dept_join_df = spark.sql("""
+    SELECT e.name, d.department_name
+    FROM employees e
+    JOIN departments d ON e.dept_id = d.dept_id
+""")
+print("Employee Names with Department Names:")
+emp_dept_join_df.show()
+
+# b) Count employees in each department
+dept_count_df = spark.sql("""
+    SELECT d.department_name, COUNT(e.name) as employee_count
+    FROM employees e
+    JOIN departments d ON e.dept_id = d.dept_id
+    GROUP BY d.department_name
+""")
+print("Employee Count per Department:")
+dept_count_df.show()
+
+# c) Find departments with avg salary > 60,000
+high_avg_salary_dept_df = spark.sql("""
+    SELECT d.department_name, ROUND(AVG(e.salary), 2) as avg_salary
+    FROM employees e
+    JOIN departments d ON e.dept_id = d.dept_id
+    GROUP BY d.department_name
+    HAVING AVG(e.salary) > 60000
+""")
+print("Departments with Average Salary > 60,000:")
+high_avg_salary_dept_df.show()
+
+# Stop the Spark session to free up resources
+spark.stop()
+Expected Output Structure
+When you execute this script, Spark will log some background processes, but your console output (generated by the .show() commands) will look similar to this mocked data:
+
+HBASE:
+
+3. The Exact Answers for Your Exercises
+Exercise 1: Students, Employees, Orders
+a) Create the tables:
+
+Plaintext
+create 'students', 'personal', 'academic'
+create 'employees', 'details', 'salary'
+create 'orders', 'customer', 'items', 'payment'
+b) Describe the structure:
+
+Plaintext
+describe 'students'
+describe 'employees'
+describe 'orders'
+c) Delete and recreate 'orders': (Exam trick: You cannot drop a table without disabling it first!)
+
+Plaintext
+disable 'orders'
+drop 'orders'
+create 'orders', 'customer', 'items', 'payment'
+d) Insert data (Examples - you must do this cell by cell):
+
+Plaintext
+put 'students', 'S01', 'personal:name', 'Alice'
+put 'students', 'S01', 'academic:marks', '85'
+put 'employees', 'E01', 'salary:basic_pay', '60000'
+put 'employees', 'E01', 'details:department', 'IT'
+put 'orders', 'O01', 'payment:mode', 'Credit Card'
+e) Retrieve only Name and Marks of all students:
+
+Plaintext
+scan 'students', {COLUMNS => ['personal:name', 'academic:marks']}
+f) & h) & i) & j) The Filter Questions (Learn this syntax!):
+HBase uses SingleColumnValueFilter to act like a SQL WHERE clause.
+
+Plaintext
+# f) Basic pay > 55000
+scan 'employees', {FILTER => "SingleColumnValueFilter('salary', 'basic_pay', >, 'binary:55000')"}
+
+# h) Students > 80 marks
+scan 'students', {FILTER => "SingleColumnValueFilter('academic', 'marks', >, 'binary:80')"}
+
+# i) Employees in IT
+scan 'employees', {FILTER => "SingleColumnValueFilter('details', 'department', =, 'binary:IT')"}
+
+# j) Orders with Credit Card
+scan 'orders', {FILTER => "SingleColumnValueFilter('payment', 'mode', =, 'binary:Credit Card')"}
+g) Top 3 orders sorted by OrderID:
+
+Plaintext
+scan 'orders', {LIMIT => 3}
+k) Count rows in employees:
+
+Plaintext
+count 'employees'
+l) Display oldest student using a scan filter:
+⚠️ Exam Theory Alert: HBase shell does not have a native MAX() function or ORDER BY value capability. To find the "oldest", you mathematically cannot do it in a single shell command without writing a custom MapReduce/Spark job. If asked this in an exam, the theoretical closest answer using a filter (assuming you know the max age is, say, 25) is finding someone equal to that age, OR simply scanning the whole table to check:
+
+Plaintext
+# Standard scan to view ages
+scan 'students', {COLUMNS => 'personal:age'}
+Exercise 2: Library
+a) Create table:
+
+Plaintext
+create 'library', 'book_info', 'availability'
+c) Retrieve details of book B002 (Using GET, not SCAN, because you know the specific Row ID):
+
+Plaintext
+get 'library', 'B002'
+d) Find all "Available" books:
+
+Plaintext
+scan 'library', {FILTER => "SingleColumnValueFilter('availability', 'status', =, 'binary:Available')"}
+e) Update status to Borrowed by Michael:
+(Remember: In HBase, an update is just a put that overwrites the existing data).
+
+Plaintext
+put 'library', 'B003', 'availability:status', 'Borrowed'
+put 'library', 'B003', 'availability:borrower', 'Michael'
+f) Count books:
+
+Plaintext
+count 'library'
+Exercise 3: Transactions
+a) Create table:
+
+Plaintext
+create 'transactions', 'customer_info', 'transaction_details'
+c) Amount > 3000:
+
+Plaintext
+scan 'transactions', {FILTER => "SingleColumnValueFilter('transaction_details', 'amount', >, 'binary:3000')"}
+e) Retrieve only names and amounts:
+
+Plaintext
+scan 'transactions', {COLUMNS => ['customer_info:name', 'transaction_details:amount']}
+f) Delete transaction T002:
+(To delete a single row entirely, use deleteall. To delete just one column, use delete).
+
+Plaintext
+deleteall 'transactions', 'T002'
+
+Hive:
+
+CREATE TABLE table_name (col1 STRING, col2 INT)
+ROW FORMAT DELIMITED 
+FIELDS TERMINATED BY ',' 
+STORED AS TEXTFILE;
+B. Loading Data
+Moving data from HDFS into your Hive table:
+
+SQL
+LOAD DATA INPATH 'hdfs:///user/data/dataset.csv' INTO TABLE table_name;
+C. The "Dynamic Partitioning" Setup
+For any question that asks you to insert data dynamically into partitions, you MUST run these two commands in the Hive shell first, or it will throw an error:
+
+SQL
+SET hive.exec.dynamic.partition=true;
+SET hive.exec.dynamic.partition.mode=nonstrict;
+3. The Exact Answers for Your Exercises
+(Note: I am assuming logical data types for the CSV columns based on the context of the questions. Adjust the column names slightly if your exact CSV header differs).
+
+Exercise 1: Web Server Logs
+a) Create table and Load:
+
+SQL
+CREATE TABLE weblogs (url STRING, log_date STRING, log_time STRING, status_code INT)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+
+LOAD DATA INPATH 'hdfs:///user/data/weblogs.csv' INTO TABLE weblogs;
+b) Most Visited URLs:
+
+SQL
+SELECT url, COUNT(*) as visits FROM weblogs GROUP BY url ORDER BY visits DESC LIMIT 5;
+c) Peak Traffic Hours (Assuming log_time is 'HH:MM:SS'):
+
+SQL
+SELECT hour(log_time) as hr, COUNT(*) as traffic FROM weblogs GROUP BY hour(log_time) ORDER BY traffic DESC LIMIT 1;
+d) Find 404 Errors:
+
+SQL
+SELECT * FROM weblogs WHERE status_code = 404;
+e) Partitioned Table by Date (Learn this flow!):
+
+SQL
+-- 1. Enable dynamic partitioning
+SET hive.exec.dynamic.partition=true;
+SET hive.exec.dynamic.partition.mode=nonstrict;
+
+-- 2. Create the partitioned table (Notice log_date is inside PARTITIONED BY, not the main columns)
+CREATE TABLE weblogs_part (url STRING, log_time STRING, status_code INT)
+PARTITIONED BY (log_date STRING)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+
+-- 3. Insert data dynamically (The partition column MUST be the last column in the SELECT)
+INSERT INTO TABLE weblogs_part PARTITION(log_date)
+SELECT url, log_time, status_code, log_date FROM weblogs;
+f) Bucketed Table by Status Code:
+
+SQL
+-- Enable bucketing
+SET hive.enforce.bucketing = true;
+
+-- Create bucketed table
+CREATE TABLE weblogs_bucket (url STRING, log_date STRING, log_time STRING, status_code INT)
+CLUSTERED BY (status_code) INTO 4 BUCKETS
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+
+-- Insert data
+INSERT INTO TABLE weblogs_bucket SELECT * FROM weblogs;
+
+-- Retrieve 404
+SELECT * FROM weblogs_bucket WHERE status_code = 404;
+Exercise 2: Movie Ratings
+a) Create and Load:
+
+SQL
+CREATE TABLE movies (movie_id INT, title STRING, genre STRING, rating DOUBLE, review_date STRING, release_year INT)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+
+LOAD DATA INPATH 'hdfs:///user/data/movie_ratings.csv' INTO TABLE movies;
+b) Top 5 Highest Rated Movies:
+
+SQL
+SELECT title, rating FROM movies ORDER BY rating DESC LIMIT 5;
+c) Most Popular Genre:
+
+SQL
+SELECT genre, COUNT(*) as count FROM movies GROUP BY genre ORDER BY count DESC LIMIT 1;
+d) Yearly Trends (Extract Year from Date):
+
+SQL
+SELECT year(review_date) as yr, COUNT(*) as reviews_count FROM movies GROUP BY year(review_date);
+e) Partitioned by Genre:
+
+SQL
+CREATE TABLE movies_part (movie_id INT, title STRING, rating DOUBLE, review_date STRING, release_year INT)
+PARTITIONED BY (genre STRING)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+
+INSERT INTO TABLE movies_part PARTITION(genre)
+SELECT movie_id, title, rating, review_date, release_year, genre FROM movies;
+
+SELECT * FROM movies_part WHERE genre = 'Sci-Fi';
+f) Bucketed by Release Year:
+
+SQL
+CREATE TABLE movies_bucket (movie_id INT, title STRING, genre STRING, rating DOUBLE, review_date STRING, release_year INT)
+CLUSTERED BY (release_year) INTO 5 BUCKETS
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+
+INSERT INTO TABLE movies_bucket SELECT * FROM movies;
+
+SELECT rating FROM movies_bucket WHERE release_year = 2019;
+Exercise 3: Flight Data
+a) Create and Load:
+
+SQL
+CREATE TABLE flights (flight_id STRING, airline STRING, departure_date STRING, status STRING, delay_minutes INT)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+
+LOAD DATA INPATH 'hdfs:///user/data/flight_data.csv' INTO TABLE flights;
+b) Airline with Most Delays:
+
+SQL
+SELECT airline, SUM(delay_minutes) as total_delay FROM flights GROUP BY airline ORDER BY total_delay DESC LIMIT 1;
+c) Count Flights by Status:
+
+SQL
+SELECT status, COUNT(*) FROM flights GROUP BY status;
+d) Average Delay per Airline:
+
+SQL
+SELECT airline, AVG(delay_minutes) FROM flights GROUP BY airline;
+e) Partitioned by Departure Date:
+
+SQL
+CREATE TABLE flights_part (flight_id STRING, airline STRING, status STRING, delay_minutes INT)
+PARTITIONED BY (departure_date STRING)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+
+INSERT INTO TABLE flights_part PARTITION(departure_date)
+SELECT flight_id, airline, status, delay_minutes, departure_date FROM flights;
+f) Bucketed by Airline:
+
+SQL
+CREATE TABLE flights_bucket (flight_id STRING, airline STRING, departure_date STRING, status STRING, delay_minutes INT)
+CLUSTERED BY (airline) INTO 4 BUCKETS
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+
+INSERT INTO TABLE flights_bucket SELECT * FROM flights;
+
+SELECT * FROM flights_bucket WHERE airline = 'Delta';
+
+
+
+from pyspark.sql import SparkSession
+
+# 1. Initialize Spark (We need SparkContext for RDDs)
+spark = SparkSession.builder.appName("LogAnalysis").getOrCreate()
+sc = spark.sparkContext 
+
+# 2. Read text file into an RDD
+log_rdd = sc.textFile("hdfs:///user/data/weblogs.txt")
+
+# 3. Extract HTTP Status Codes and count them
+# Map creates a tuple (status_code, 1), reduceByKey adds the 1s together
+status_counts = log_rdd.map(lambda line: (line.split(" ")[-2], 1)) \
+                       .reduceByKey(lambda a, b: a + b)
+
+# 4. Find most common IPs
+ip_counts = log_rdd.map(lambda line: (line.split(" ")[0], 1)) \
+                   .reduceByKey(lambda a, b: a + b)
+
+# 5. Filter out error logs (4xx and 5xx) and count them
+error_logs = log_rdd.filter(lambda line: line.split(" ")[-2].startswith('4') or \
+                                         line.split(" ")[-2].startswith('5'))
+error_count = error_logs.count()
+
+# 6. Write back to HDFS (This creates a folder with part files)
+status_counts.saveAsTextFile("hdfs:///user/data/status_output")
+Exercise 2: JSON Processing with DataFrames
+JSON and DataFrames are a perfect match because JSON already has a schema (keys and values).
+
+Python
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder.appName("JSON_Process").getOrCreate()
+
+# 1. Read JSON from HDFS
+df = spark.read.json("hdfs:///user/data/users.json")
+
+# 2. Select specific fields
+selected_df = df.select("name", "age", "department")
+selected_df.show()
+
+# 3. Filter users older than 30
+older_users = df.filter(df.age > 30)
+
+# 4. Group by categorical field
+dept_counts = df.groupBy("department").count()
+dept_counts.show()
+
+# 5. Save back to HDFS as JSON
+dept_counts.write.mode("overwrite").json("hdfs:///user/data/json_output")
+Exercise 3: CSV Sales Data with DataFrames
+You will need to import col from pyspark.sql.functions to do math on columns.
+
+Python
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col
+
+spark = SparkSession.builder.appName("SalesProcess").getOrCreate()
+
+# 1. Read CSV
+df = spark.read.csv("hdfs:///user/data/sales.csv", header=True, inferSchema=True)
+
+# 2. Compute total revenue (Create a new column using withColumn)
+df_revenue = df.withColumn("Revenue", col("Price") * col("Quantity"))
+
+# 3. Find highest-selling product by revenue
+highest_selling = df_revenue.orderBy(col("Revenue").desc()).limit(1)
+highest_selling.show()
+
+# 4. Filter transactions > $500
+high_value_sales = df_revenue.filter(col("Revenue") > 500)
+
+# 5. Group by category and sum revenue
+category_revenue = df_revenue.groupBy("Category").sum("Revenue")
+
+# 6. Save back as CSV
+category_revenue.write.mode("overwrite").csv("hdfs:///user/data/sales_output", header=True)
